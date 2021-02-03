@@ -1,0 +1,110 @@
+# ansible-playbook libvirt-hassos.yaml
+---
+- name: Setup HassOS host
+  hosts: localhost
+  connection: local
+  gather_facts: no
+  become: true
+  vars_files:
+  - vars.yml
+
+  tasks:
+  - name: get list of VMs
+    virt:
+      command: "list_vms"
+    register: vms
+
+  - fail:
+      msg: "Server {{ hassoshostname }} already exists, remove it before continuing"
+    when: hassoshostname in vms.list_vms
+
+  - name: Install packages
+    package:
+      name:
+      - jq
+
+  - name: Download iso
+    get_url:
+      url: https://github.com/home-assistant/operating-system/releases/download/{{ version }}/hassos_ova-{{ version }}.qcow2.xz
+      dest: ./hassos_ova-{{ version }}.qcow2.xz
+
+  - name: Unpack archive
+    shell: xzcat ./hassos_ova-{{ version }}.qcow2.xz > ./hassos_ova-{{ version }}.qcow2
+    args:
+      creates: hassos_ova-{{ version }}.qcow2
+
+  - name: Create HassOS VM
+    command: >
+      virt-install
+        --name {{ hassoshostname }}
+        --memory=2048
+        --vcpus=2
+        --disk=hassos_ova-{{ version }}.qcow2,format=qcow2,bus=ide
+        --boot uefi
+        --import
+        --network=bridge=frop
+        --machine ubuntu
+        --os-variant generic
+        --autostart
+        --channel unix,mode=bind,path=/var/lib/libvirt/qemu/guest01.agent,target_type=virtio,name=org.qemu.guest_agent.0
+        --noautoconsole
+
+  - name: Get IP
+    shell: >
+      virsh
+      qemu-agent-command
+      {{ hassoshostname }}
+      '{"execute":"guest-network-get-interfaces"}' | jq '.return[] | select (.name=="enp0s3") | ."ip-addresses"[] | select (."ip-address-type"=="ipv4") | ."ip-address"'
+      -r
+    register: hassip
+    retries: 60
+    delay: 2
+    until: hassip.stdout_lines|length > 0
+
+  - debug:
+      msg: "IP is {{ hassip.stdout }}"
+
+  - name: Create template
+    copy:
+      dest: usb_device.xml
+      content: |
+        <hostdev mode='subsystem' type='usb' managed='yes'>
+          <source>
+            <vendor id='0x0451'/>
+            <product id='0x16a8'/>
+          </source>
+        </hostdev>
+
+  - name: Add USB stick
+    command: >
+      virsh
+      attach-device
+      {{ hassoshostname }}
+      --file usb_device.xml
+      --config
+      --live
+
+  - name: Wait for Docker to settle
+    wait_for:
+      port: 8123
+      host: "{{ hassip.stdout }}"
+
+  - name: Username/password aanmaken
+    uri:
+      url: "http://{{ hassip.stdout }}:8123/api/onboarding/users"
+      body_format: json
+      method: POST
+      body:
+        username: admin
+        password: admin
+        name: admin
+        language: en
+        client_id: "http://{{ hassip.stdout }}:8123"
+    register: result
+    until: result.status == 200
+    retries: 200 # 20x5 seconds = 100 seconds
+    delay: 5
+
+  - name: Show URL
+    debug:
+      msg: "Ga naar http://{{ hassip.stdout }}:8123 en maak je account"
