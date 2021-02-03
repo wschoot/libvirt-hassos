@@ -4,17 +4,17 @@
   hosts: localhost
   connection: local
   gather_facts: no
-  become: true
   vars_files:
   - vars.yml
 
   tasks:
-  - name: get list of VMs
+  - name: Get list of VMs
     virt:
       command: "list_vms"
     register: vms
 
-  - fail:
+  - name: Check if virtual machine is already present
+    fail:
       msg: "Server {{ hassoshostname }} already exists, remove it before continuing"
     when: hassoshostname in vms.list_vms
 
@@ -36,18 +36,18 @@
   - name: Create HassOS VM
     command: >
       virt-install
-        --name {{ hassoshostname }}
-        --memory=2048
-        --vcpus=2
-        --disk=hassos_ova-{{ version }}.qcow2,format=qcow2,bus=ide
-        --boot uefi
-        --import
-        --network=bridge=frop
-        --machine ubuntu
-        --os-variant generic
-        --autostart
-        --channel unix,mode=bind,path=/var/lib/libvirt/qemu/guest01.agent,target_type=virtio,name=org.qemu.guest_agent.0
-        --noautoconsole
+      --name {{ hassoshostname }}
+      --memory=2048
+      --vcpus=2
+      --disk=hassos_ova-{{ version }}.qcow2,format=qcow2,bus=ide
+      --boot uefi
+      --import
+      --network=bridge=frop
+      --machine ubuntu
+      --os-variant generic
+      --autostart
+      --channel unix,mode=bind,path=/var/lib/libvirt/qemu/guest01.agent,target_type=virtio,name=org.qemu.guest_agent.0
+      --noautoconsole
 
   - name: Get IP
     shell: >
@@ -84,12 +84,17 @@
       --config
       --live
 
+  - name: Remove file
+    file:
+      path: usb_devices.yml
+      state: absent
+
   - name: Wait for Docker to settle
     wait_for:
       port: 8123
       host: "{{ hassip.stdout }}"
 
-  - name: Username/password aanmaken
+  - name: Create Username/password
     uri:
       url: "http://{{ hassip.stdout }}:8123/api/onboarding/users"
       body_format: json
@@ -107,4 +112,4 @@
 
   - name: Show URL
     debug:
-      msg: "Ga naar http://{{ hassip.stdout }}:8123 en maak je account"
+      msg: "Go to http://{{ hassip.stdout }}:8123 and login with admin / admin"
