@@ -38,3 +38,7 @@ hassoshostname: hassos
 -> `Supervisor` -> `Add-on Store` -> `Portainer` -> `Install`
 > Note: By default, system containers are hidden. Unhide with _Portainer_ -> _Settings_ -> _[Remove]_ (for each "Hidden container")
 > Note: By default, _Protection mode_ is enabled. You might wanna disable this from time to time.
+
+# Integration
+## mqtt
+Go to `integrations` and add the mqtt-integration
