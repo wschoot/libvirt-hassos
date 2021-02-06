@@ -3,11 +3,20 @@
 - name: Setup HassOS host
   hosts: localhost
   connection: local
-  gather_facts: no
+  gather_facts: yes
+  vars:
+    ansible_python_interpreter: "/usr/bin/python3"
+
   vars_files:
   - vars.yml
 
   tasks:
+  - name: Is er een keydevice
+    shell:
+      cmd: lsusb | grep  "ID 0451:16a8 Texas Instruments"
+    failed_when: res.stdout_lines|length == 0
+    register: res
+
   - name: Get list of VMs
     virt:
       command: "list_vms"
@@ -55,14 +64,12 @@
       qemu-agent-command
       {{ hassoshostname }}
       '{"execute":"guest-network-get-interfaces"}' | jq '.return[] | select (.name=="enp0s3") | ."ip-addresses"[] | select (."ip-address-type"=="ipv4") | ."ip-address"'
-      -r
+      --raw-output
     register: hassip
     retries: 60
     delay: 2
     until: hassip.stdout_lines|length > 0
-
-  - debug:
-      msg: "IP is {{ hassip.stdout }}"
+    tags: updateconf
 
   - name: Create template
     copy:
@@ -110,6 +117,36 @@
     retries: 200 # 20x5 seconds = 100 seconds
     delay: 5
 
+  - block:
+    - name: Get fh
+      command: >
+        virsh
+        qemu-agent-command
+        {{ hassoshostname }}
+        '{"execute":"guest-file-open", "arguments":{"path":"/mnt/data/supervisor/homeassistant/configuration.yaml","mode":"r"}}'
+      register: conffh
+
+    - name: Read contents from fh
+      command: >
+        virsh
+        qemu-agent-command
+        {{ hassoshostname }}
+        '{"execute":"guest-file-read", "arguments":{"handle":{{ (conffh.stdout|from_json).return}}}}'
+      register: conf
+
+    - name: Set conf
+      set_fact:
+        config: |
+          {{ (conf.stdout|from_json)['return']['buf-b64']|b64decode }}
+          homeassistant:
+            auth_providers:
+              - type: trusted_networks
+                trusted_networks:
+                - {{ ansible_default_ipv4.network }}/24
+    tags: updateconf
+
   - name: Show URL
     debug:
       msg: "Go to http://{{ hassip.stdout }}:8123 and login with admin / admin"
+
+
